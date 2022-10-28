@@ -1,0 +1,23 @@
+NXP Software Content Register
+
+Release Name:           IMX8M lwIP Demo
+Version:                1.0
+Date Created:           October-2022
+Release Location:       
+Description:            Patches for i.MX8M lwIP Demo
+
+Package:                        imx8m_lwip_port.patch 
+Outgoing License:               Open Source - BSD-3-Clause
+License File:                   LICENSE.BSD
+Package Category:               lwIP Middleware
+Description and comments:       Patch for lwIP port
+Type of content:                Source code
+Origin:                         NXP (BSD-3-Clause)
+
+Package:                        imx8mm_lwip_examples.patch
+Outgoing License:               Open Source - BSD-3-Clause
+License File:                   LICENSE.BSD
+Package Category:               lwIP Example Application
+Description and comments:       Patch for lwIP examples
+Type of content:                Source code
+Origin:                         NXP (BSD-3-Clause)

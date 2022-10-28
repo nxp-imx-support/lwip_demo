@@ -1,0 +1,409 @@
+diff --git a/port/arch/cc.h b/port/arch/cc.h
+new file mode 100644
+index 00000000..44128c2f
+--- /dev/null
++++ b/port/arch/cc.h
+@@ -0,0 +1,79 @@
++/*
++ * Copyright (c) 2001-2003 Swedish Institute of Computer Science.
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without modification,
++ * are permitted provided that the following conditions are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright notice,
++ *    this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright notice,
++ *    this list of conditions and the following disclaimer in the documentation
++ *    and/or other materials provided with the distribution.
++ * 3. The name of the author may not be used to endorse or promote products
++ *    derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
++ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
++ * SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
++ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
++ * OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
++ * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
++ * OF SUCH DAMAGE.
++ *
++ * This file is part of the lwIP TCP/IP stack.
++ *
++ * Author: Adam Dunkels <adam@sics.se>
++ * Author: Stefano Oliveri <stefano.oliveri@st.com>
++ *
++ */
++
++/*
++ * Copyright 2022 NXP
++ * All rights reserved.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ */
++
++#ifndef __CC_H__
++#define __CC_H__
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdint.h>
++#include <string.h>
++#include <sys/time.h>
++
++/* Typedefs for the types used by lwip */
++typedef uint8_t		u8_t;
++typedef uint16_t	u16_t;
++typedef uint32_t	u32_t;
++typedef int8_t		s8_t;
++typedef int16_t	        s16_t;
++typedef int32_t         s32_t;
++
++typedef uintptr_t       mem_ptr_t;
++
++/* Compiler hints for packing LWIP's structures */
++#define PACK_STRUCT_BEGIN
++#define PACK_STRUCT_STRUCT __attribute__((packed, aligned(1)))
++#define PACK_STRUCT_END
++#define PACK_STRUCT_FIELD(x) x
++
++/* Plaform specific diagnostic output */
++// non-fatal, print a message.
++#define LWIP_PLATFORM_DIAG(x)   do {PRINTF x;PRINTF("\r\n");} while(0)
++
++// fatal, print message and abandon execution.
++#define LWIP_PLATFORM_ASSERT(x) do {printf("Assertion \"%s\" failed at line %d in %s\n", \
++                                     x, __LINE__, __FILE__) ; abort();} while(0)
++
++extern volatile u32_t time_ms;
++
++inline u32_t sys_now(void) {return time_ms;};
++
++#endif /* __CC_H__ */
++
+diff --git a/port/enetif.c b/port/enetif.c
+new file mode 100644
+index 00000000..34796372
+--- /dev/null
++++ b/port/enetif.c
+@@ -0,0 +1,211 @@
++/*
++ * Copyright (c) 2022, NXP
++ * All rights reserved.
++ *
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ */
++
++#include "enetif.h"
++
++int _write(int handle, char *buffer, int size)
++{
++        if (NULL == buffer)
++        {
++                /* return -1 if error. */
++                return -1;
++        }
++
++        /* This function only writes to "standard out" and "standard err" for all other file handles it returns failure. */
++        if ((handle != 1) && (handle != 2))
++        {
++                return -1;
++        }
++
++        int i;
++        for(i = 0; i < size; i++) {
++                if (buffer[i] == '\n') {
++                        DbgConsole_Putchar('\r');
++                }
++                DbgConsole_Putchar(buffer[i]);
++        }
++
++        return size;
++}
++
++void OSAL_TIMER_IRQHandler(void)
++{
++    /* Clear interrupt flag.*/
++    GPT_ClearStatusFlags(OSAL_TIMER, kGPT_OutputCompare1Flag);
++    time_ms += 5;   // add 5ms
++    if (time_ms % 1000 == 0)
++        system_time_base.tv_sec += 1; // add 1000000us
++        
++/* Add for ARM errata 838869, affects Cortex-M4, Cortex-M4F, Cortex-M7, Cortex-M7F Store immediate overlapping
++    exception return operation might vector to incorrect interrupt */
++#if defined __CORTEX_M && (__CORTEX_M == 4U || __CORTEX_M == 7U)
++    __DSB();
++#endif
++}
++
++void osal_timer_init(void)
++{
++    gpt_config_t gptConfig;
++    CLOCK_SetRootMux(kCLOCK_RootGpt1, kCLOCK_GptRootmuxSysPll1Div2); /* Set GPT1 source to SYSTEM PLL1 DIV2 400MHZ */
++    CLOCK_SetRootDivider(kCLOCK_RootGpt1, 1U, 4U);                   /* Set root clock to 400MHZ / 4 = 100MHZ */
++    GPT_GetDefaultConfig(&gptConfig);
++    GPT_Init(OSAL_TIMER, &gptConfig);
++    /*Divide GPT clock source frequency to 1MHz*/
++    GPT_SetClockDivider(OSAL_TIMER, 100);
++    /* Set both GPT modules to 5ms duration */
++    GPT_SetOutputCompareValue(OSAL_TIMER, kGPT_OutputCompare_Channel1, 100000/200);
++    /* Enable GPT Output Compare1 interrupt */
++    GPT_EnableInterrupts(OSAL_TIMER, kGPT_OutputCompare1InterruptEnable);
++    /* Enable at the Interrupt */
++    EnableIRQ(OSAL_TIMER_IRQ_ID);
++    GPT_StartTimer(OSAL_TIMER);
++}
++
++void osal_gettime(struct timeval *current_time)
++{
++    uint32_t sec = system_time_base.tv_sec;
++    uint32_t usec = GPT_GetCurrentTimerCount(OSAL_TIMER);
++    uint32_t sec_again = system_time_base.tv_sec;
++    /*in case of that the GPT IRQ occurred during the sec and usec reading obove*/
++    if (sec != sec_again) {
++        usec = GPT_GetCurrentTimerCount(OSAL_TIMER);
++    }
++    current_time->tv_sec = sec_again;
++    current_time->tv_usec = usec;
++}
++
++/* initializes the PHY and the ETH controller */
++int ethernetif_init(uint8_t *myMAC) {  
++    enet_config_t config;   
++
++    int phy_autonego_timeout_count = if_port.phy_autonego_timeout_count;
++    volatile uint32_t count = phy_autonego_timeout_count;
++    bool link              = false;
++    bool autonego          = false;
++    
++    status_t status;
++    phy_speed_t speed;
++    phy_duplex_t duplex;
++    ENET_GetDefaultConfig(&config);
++
++    if_port.mdioHandle.resource.base = if_port.base;
++    if_port.mdioHandle.resource.csrClock_Hz = if_port.srcClock_Hz;
++    if_port.phyHandle.mdioHandle = &if_port.mdioHandle;
++    config.miiMode = if_port.mii_mode;
++
++    do {
++        status = PHY_Init(&if_port.phyHandle, &if_port.phy_config);
++        if (status == kStatus_Success) {
++            printf("Wait for PHY link up...\r\n");
++            do {
++               PHY_GetAutoNegotiationStatus(&if_port.phyHandle, &autonego);
++               PHY_GetLinkStatus(&if_port.phyHandle, &link);
++               if (autonego && link) {
++                    break;
++               }
++               if (phy_autonego_timeout_count)
++                   count--;
++            } while(count);
++            if (!autonego) {
++                 printf("PHY Auto-negotiation failed. Please check the cable connection and link partner setting.\r\n");
++                 return -1;
++            }
++        }
++    } while (!(link && autonego));
++
++    if (if_port.phy_stability_delay_us)
++        SDK_DelayAtLeastUs(if_port.phy_stability_delay_us,
++                           SDK_DEVICE_MAXIMUM_CPU_CLOCK_FREQUENCY);
++    
++    /*Get the actual PHY link speed*/
++    PHY_GetLinkSpeedDuplex(&if_port.phyHandle, &speed, &duplex);
++    config.miiSpeed  = (enet_mii_speed_t)speed;
++    config.miiDuplex = (enet_mii_duplex_t)duplex;
++
++    ENET_Init(if_port.base, &if_port.g_handle, &config, 
++          if_port.bufferConfig, myMAC, if_port.srcClock_Hz);
++    ENET_ActiveRead(if_port.base);
++
++    return 0;
++}
++
++/* lwip calls this function to send ethernet frames */
++err_t netif_output(struct netif *netif, struct pbuf *p) {
++    uint8_t *data = (uint8_t*)p->payload;
++    if (ENET_SendFrame(if_port.base, &if_port.g_handle, data, p->tot_len, 0, false, NULL) == kStatus_Success) {
++        #ifdef NDEBUG
++        #else
++	        printf("Send success!\n");
++            printf(" Dest Address %02x:%02x:%02x:%02x:%02x:%02x \
++                     Src Address %02x:%02x:%02x:%02x:%02x:%02x \r\n",
++                     data[0], data[1], data[2], data[3], data[4], data[5],
++                     data[6], data[7], data[8], data[9], data[10], data[11]);
++            
++	        printf(" Data: ");
++            for (int i = 12; i < 73; i++)
++                printf("%02x ", data[i]);
++            printf("\n");
++        #endif
++        return ERR_OK;
++    } else {
++        printf("Send failed!\n");
++        return 0;
++    }
++}
++
++/* must be called repeatedly to pass received ethernet frames to lwip */ 
++void ethernetif_receive(struct netif *netif){
++  uint32_t length;
++  status_t status;
++  enet_data_error_stats_t eErrStatic;
++  /* Get the Frame size */
++   status = ENET_GetRxFrameSize(&if_port.g_handle, &length, 0);
++   /* Call ENET_ReadFrame when there is a received frame. */
++   if (length != 0)
++   {
++       /* Received valid frame. Deliver the rx buffer with the size equal to length. */
++        uint8_t *data = (uint8_t *)malloc(length);
++        status        = ENET_ReadFrame(if_port.base, &if_port.g_handle, data, length, 0, NULL);
++        if (status == kStatus_Success) {
++            struct pbuf* p = pbuf_alloc(PBUF_RAW, length, PBUF_POOL);
++            if (p != NULL) {
++                pbuf_take(p, data, length);
++            }
++            #ifdef NDEBUG
++            #else
++                printf("A frame received. the length %lu ", length);
++                printf(" Dest Address %02x:%02x:%02x:%02x:%02x:%02x \
++                         Src Address %02x:%02x:%02x:%02x:%02x:%02x \r\n",
++                         data[0], data[1], data[2], data[3], data[4], data[5],
++                         data[6], data[7], data[8], data[9], data[10], data[11]);
++                
++		        printf(" Data: ");
++                for (int i = 12; i < 73; i++)
++                    printf("%02x ", data[i]);
++                printf("\n");
++            #endif
++
++            if (netif->input(p, netif) != ERR_OK) {
++                pbuf_free(p);
++            }
++
++        } else
++            printf("ENET_ReadFrame error status = %ld\n", status);
++
++        free(data);
++   }
++   else if (status == kStatus_ENET_RxFrameError)
++   {
++        /* Update the received buffer when error happened. */
++        /* Get the error information of the received g_frame. */
++        ENET_GetRxErrBeforeReadFrame(&if_port.g_handle, &eErrStatic, 0);
++        /* update the receive buffer. */
++        ENET_ReadFrame(if_port.base, &if_port.g_handle, NULL, 0, 0, NULL);
++        printf("Error receive\n");
++   }
++}
+diff --git a/port/enetif.h b/port/enetif.h
+new file mode 100644
+index 00000000..86fadeb5
+--- /dev/null
++++ b/port/enetif.h
+@@ -0,0 +1,101 @@
++/*
++ * Copyright (c) 2022, NXP
++ * All rights reserved.
++ *
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ */
++
++#include <stdlib.h>
++#include <stdio.h>
++#include <time.h>
++#include <sys/time.h>
++#if defined(FSL_FEATURE_MEMORY_HAS_ADDRESS_OFFSET) && FSL_FEATURE_MEMORY_HAS_ADDRESS_OFFSET
++#include "fsl_memory.h"
++#endif
++
++#include "lwip/netif.h"
++#include "lwip/init.h"
++#include "lwip/etharp.h"
++#include "fsl_enet.h"
++#include "fsl_debug_console.h"
++#include "fsl_enet_mdio.h"
++#include "fsl_phy.h"
++#include "fsl_gpt.h"
++
++#define IFNAME0 'e'
++#define IFNAME1 '0'
++
++#define ENET_RXBD_NUM          (4)
++#define ENET_TXBD_NUM          (4)
++
++#define ENET_RXBUFF_SIZE       (ENET_FRAME_MAX_FRAMELEN)
++#define ENET_TXBUFF_SIZE       (ENET_FRAME_MAX_FRAMELEN)
++
++/* Buffer descriptors should be in non-cacheable region and should be align to "ENET_BUFF_ALIGNMENT". */
++AT_NONCACHEABLE_SECTION_ALIGN(enet_rx_bd_struct_t g_rxBuffDescrip[ENET_RXBD_NUM], ENET_BUFF_ALIGNMENT);
++AT_NONCACHEABLE_SECTION_ALIGN(enet_tx_bd_struct_t g_txBuffDescrip[ENET_TXBD_NUM], ENET_BUFF_ALIGNMENT);
++
++/* The data buffers can be in cacheable region or in non-cacheable region.
++ * If use cacheable region, the alignment size should be the maximum size of "CACHE LINE SIZE" and "ENET_BUFF_ALIGNMENT"
++ * If use non-cache region, the alignment size is the "ENET_BUFF_ALIGNMENT".
++ */
++AT_NONCACHEABLE_SECTION_ALIGN(uint8_t g_rxDataBuff[ENET_RXBD_NUM][SDK_SIZEALIGN(ENET_RXBUFF_SIZE, ENET_BUFF_ALIGNMENT)],
++          ENET_BUFF_ALIGNMENT);
++AT_NONCACHEABLE_SECTION_ALIGN(uint8_t g_txDataBuff[ENET_TXBD_NUM][SDK_SIZEALIGN(ENET_TXBUFF_SIZE, ENET_BUFF_ALIGNMENT)],
++          ENET_BUFF_ALIGNMENT);
++
++enet_buffer_config_t buffConfig[] = {{
++    ENET_RXBD_NUM,
++    ENET_TXBD_NUM,
++    SDK_SIZEALIGN(ENET_RXBUFF_SIZE, ENET_BUFF_ALIGNMENT),
++    SDK_SIZEALIGN(ENET_TXBUFF_SIZE, ENET_BUFF_ALIGNMENT),
++    &g_rxBuffDescrip[0],
++    &g_txBuffDescrip[0],
++    &g_rxDataBuff[0][0],
++    &g_txDataBuff[0][0],
++    true,
++    true,
++    NULL,
++}};
++
++/*********************************************************************
++GPT timer will be used to calculate the system time and delay;
++*********************************************************************/
++#define OSAL_TIMER_IRQ_ID       GPT1_IRQn
++#define OSAL_TIMER              GPT1
++#define OSAL_TIMER_IRQHandler   GPT1_IRQHandler
++#define OSAL_TIMER_CLK_FREQ     (CLOCK_GetPllFreq(kCLOCK_SystemPll1Ctrl) / (CLOCK_GetRootPreDivider(kCLOCK_RootGpt1)) / \
++     (CLOCK_GetRootPostDivider(kCLOCK_RootGpt1)) / 2) /* SYSTEM PLL1 DIV2 */
++
++volatile u32_t time_ms = 0;
++
++/*Updated on GPT IRQ*/
++struct timeval system_time_base = {
++    .tv_sec = 0,
++    .tv_usec =  0
++};
++
++struct ethernetif_port {
++    mdio_handle_t mdioHandle;
++    phy_handle_t phyHandle;
++    enet_mii_mode_t mii_mode;
++    phy_config_t phy_config;
++    ENET_Type *base;
++    enet_handle_t g_handle;
++    enet_buffer_config_t *bufferConfig;
++    uint32_t srcClock_Hz;
++    uint32_t phy_autonego_timeout_count;
++    uint32_t phy_stability_delay_us;
++};
++
++struct ethernetif_port if_port;
++
++int _write(int handle, char *buffer, int size);
++void OSAL_TIMER_IRQHandler(void);
++void osal_timer_init(void);
++void osal_gettime(struct timeval *current_time);
++int ethernetif_init(uint8_t *myMAC);
++err_t netif_output(struct netif *netif, struct pbuf *p); 
++void ethernetif_receive(struct netif *netif);
++
