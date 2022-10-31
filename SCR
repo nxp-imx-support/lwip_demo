@@ -12,7 +12,7 @@ License File:                   LICENSE.BSD
 Package Category:               lwIP Middleware
 Description and comments:       Patch for lwIP port
 Type of content:                Source code
-Origin:                         NXP (BSD-3-Clause)
+Origin:                         BSD-3-Clause
 
 Package:                        imx8mm_lwip_examples.patch
 Outgoing License:               Open Source - BSD-3-Clause
