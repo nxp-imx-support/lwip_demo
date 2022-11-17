@@ -1,9 +1,9 @@
 diff --git a/port/arch/cc.h b/port/arch/cc.h
 new file mode 100644
-index 00000000..44128c2f
+index 00000000..709fa770
 --- /dev/null
 +++ b/port/arch/cc.h
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,78 @@
 +/*
 + * Copyright (c) 2001-2003 Swedish Institute of Computer Science.
 + * All rights reserved.
@@ -71,7 +71,7 @@ index 00000000..44128c2f
 +
 +/* Plaform specific diagnostic output */
 +// non-fatal, print a message.
-+#define LWIP_PLATFORM_DIAG(x)   do {PRINTF x;PRINTF("\r\n");} while(0)
++#define LWIP_PLATFORM_DIAG(x)   do {printf x; printf("\r\n");} while(0)
 +
 +// fatal, print message and abandon execution.
 +#define LWIP_PLATFORM_ASSERT(x) do {printf("Assertion \"%s\" failed at line %d in %s\n", \
@@ -82,10 +82,9 @@ index 00000000..44128c2f
 +inline u32_t sys_now(void) {return time_ms;};
 +
 +#endif /* __CC_H__ */
-+
 diff --git a/port/enetif.c b/port/enetif.c
 new file mode 100644
-index 00000000..34796372
+index 00000000..f20bd9c0
 --- /dev/null
 +++ b/port/enetif.c
 @@ -0,0 +1,211 @@
@@ -131,7 +130,7 @@ index 00000000..34796372
 +    time_ms += 5;   // add 5ms
 +    if (time_ms % 1000 == 0)
 +        system_time_base.tv_sec += 1; // add 1000000us
-+        
++
 +/* Add for ARM errata 838869, affects Cortex-M4, Cortex-M4F, Cortex-M7, Cortex-M7F Store immediate overlapping
 +    exception return operation might vector to incorrect interrupt */
 +#if defined __CORTEX_M && (__CORTEX_M == 4U || __CORTEX_M == 7U)
@@ -171,14 +170,14 @@ index 00000000..34796372
 +}
 +
 +/* initializes the PHY and the ETH controller */
-+int ethernetif_init(uint8_t *myMAC) {  
-+    enet_config_t config;   
++int ethernetif_init(uint8_t *myMAC) {
++    enet_config_t config;
 +
 +    int phy_autonego_timeout_count = if_port.phy_autonego_timeout_count;
 +    volatile uint32_t count = phy_autonego_timeout_count;
 +    bool link              = false;
 +    bool autonego          = false;
-+    
++
 +    status_t status;
 +    phy_speed_t speed;
 +    phy_duplex_t duplex;
@@ -212,13 +211,13 @@ index 00000000..34796372
 +    if (if_port.phy_stability_delay_us)
 +        SDK_DelayAtLeastUs(if_port.phy_stability_delay_us,
 +                           SDK_DEVICE_MAXIMUM_CPU_CLOCK_FREQUENCY);
-+    
++
 +    /*Get the actual PHY link speed*/
 +    PHY_GetLinkSpeedDuplex(&if_port.phyHandle, &speed, &duplex);
 +    config.miiSpeed  = (enet_mii_speed_t)speed;
 +    config.miiDuplex = (enet_mii_duplex_t)duplex;
 +
-+    ENET_Init(if_port.base, &if_port.g_handle, &config, 
++    ENET_Init(if_port.base, &if_port.g_handle, &config,
 +          if_port.bufferConfig, myMAC, if_port.srcClock_Hz);
 +    ENET_ActiveRead(if_port.base);
 +
@@ -229,15 +228,15 @@ index 00000000..34796372
 +err_t netif_output(struct netif *netif, struct pbuf *p) {
 +    uint8_t *data = (uint8_t*)p->payload;
 +    if (ENET_SendFrame(if_port.base, &if_port.g_handle, data, p->tot_len, 0, false, NULL) == kStatus_Success) {
-+        #ifdef NDEBUG
++        printf("A frame sent. the length %d \n", p->tot_len);
++	#ifdef NDEBUG
 +        #else
-+	        printf("Send success!\n");
 +            printf(" Dest Address %02x:%02x:%02x:%02x:%02x:%02x \
 +                     Src Address %02x:%02x:%02x:%02x:%02x:%02x \r\n",
 +                     data[0], data[1], data[2], data[3], data[4], data[5],
 +                     data[6], data[7], data[8], data[9], data[10], data[11]);
-+            
-+	        printf(" Data: ");
++
++	    printf(" Data: ");
 +            for (int i = 12; i < 73; i++)
 +                printf("%02x ", data[i]);
 +            printf("\n");
@@ -249,7 +248,7 @@ index 00000000..34796372
 +    }
 +}
 +
-+/* must be called repeatedly to pass received ethernet frames to lwip */ 
++/* must be called repeatedly to pass received ethernet frames to lwip */
 +void ethernetif_receive(struct netif *netif){
 +  uint32_t length;
 +  status_t status;
@@ -267,14 +266,14 @@ index 00000000..34796372
 +            if (p != NULL) {
 +                pbuf_take(p, data, length);
 +            }
++	    printf("A frame received. the length %lu \n", length);
 +            #ifdef NDEBUG
 +            #else
-+                printf("A frame received. the length %lu ", length);
 +                printf(" Dest Address %02x:%02x:%02x:%02x:%02x:%02x \
 +                         Src Address %02x:%02x:%02x:%02x:%02x:%02x \r\n",
 +                         data[0], data[1], data[2], data[3], data[4], data[5],
 +                         data[6], data[7], data[8], data[9], data[10], data[11]);
-+                
++
 +		        printf(" Data: ");
 +                for (int i = 12; i < 73; i++)
 +                    printf("%02x ", data[i]);
@@ -302,10 +301,10 @@ index 00000000..34796372
 +}
 diff --git a/port/enetif.h b/port/enetif.h
 new file mode 100644
-index 00000000..86fadeb5
+index 00000000..fb156a0f
 --- /dev/null
 +++ b/port/enetif.h
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,100 @@
 +/*
 + * Copyright (c) 2022, NXP
 + * All rights reserved.
@@ -404,6 +403,5 @@ index 00000000..86fadeb5
 +void osal_timer_init(void);
 +void osal_gettime(struct timeval *current_time);
 +int ethernetif_init(uint8_t *myMAC);
-+err_t netif_output(struct netif *netif, struct pbuf *p); 
++err_t netif_output(struct netif *netif, struct pbuf *p);
 +void ethernetif_receive(struct netif *netif);
-+
